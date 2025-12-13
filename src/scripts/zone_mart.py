@@ -203,20 +203,7 @@ class ZoneMartBuilder:
         return all_events_enriched
     
     def identify_registration_events(self, events_enriched_df):
-        """
-        Определение событий регистрации пользователей.
-        
-        Регистрация определяется по первому сообщению пользователя.
-        
-        Args:
-            events_enriched_df: DataFrame с обогащенными событиями
-            
-        Returns:
-            DataFrame с помеченными событиями регистрации
-        """
-        logger.info("Определение событий регистрации")
-        
-        # Находим первое сообщение каждого пользователя
+        # Регистрация определяется по первому сообщению пользователя
         first_messages = events_enriched_df.filter(
             F.col("event_type") == "message"
         ).groupBy("user_id").agg(
@@ -238,18 +225,7 @@ class ZoneMartBuilder:
         
         return events_with_registration
     
-    def build_mart(self, events_path: str, cities_path: str, output_path: str):
-        """
-        Построение витрины данных в разрезе зон.
-        
-        Args:
-            events_path: путь к данным событий
-            cities_path: путь к данным городов
-            output_path: путь для сохранения витрины
-        """
-        logger.info("Начало построения витрины зон")
-        
-        # Загрузка данных
+    def build_mart(self, events_path, cities_path, output_path):
         events_df = self.load_events(events_path)
         cities_df = self.load_cities(cities_path)
         
