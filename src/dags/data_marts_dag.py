@@ -37,7 +37,6 @@ daily_dag = DAG(
 build_user_mart = BashOperator(
     task_id='build_user_mart',
     bash_command=f"""
-    cd /opt/airflow/scripts && \
     spark-submit \
         --master yarn \
         --deploy-mode client \
@@ -45,7 +44,7 @@ build_user_mart = BashOperator(
         --executor-memory 4g \
         --executor-cores 2 \
         --num-executors 4 \
-        user_mart.py \
+        /opt/airflow/scripts/user_mart.py \
         {EVENTS_PATH} \
         {CITIES_PATH} \
         {USER_MART_PATH}
@@ -56,7 +55,6 @@ build_user_mart = BashOperator(
 build_friends_recommendation_mart = BashOperator(
     task_id='build_friends_recommendation_mart',
     bash_command=f"""
-    cd /opt/airflow/scripts && \
     spark-submit \
         --master yarn \
         --deploy-mode client \
@@ -64,7 +62,7 @@ build_friends_recommendation_mart = BashOperator(
         --executor-memory 4g \
         --executor-cores 2 \
         --num-executors 4 \
-        friends_recommendation_mart.py \
+        /opt/airflow/scripts/friends_recommendation_mart.py \
         {EVENTS_PATH} \
         {CITIES_PATH} \
         {FRIENDS_RECOMMENDATION_MART_PATH}
@@ -87,7 +85,6 @@ weekly_dag = DAG(
 build_zone_mart = BashOperator(
     task_id='build_zone_mart',
     bash_command=f"""
-    cd /opt/airflow/scripts && \
     spark-submit \
         --master yarn \
         --deploy-mode client \
@@ -95,7 +92,7 @@ build_zone_mart = BashOperator(
         --executor-memory 4g \
         --executor-cores 2 \
         --num-executors 4 \
-        zone_mart.py \
+        /opt/airflow/scripts/zone_mart.py \
         {EVENTS_PATH} \
         {CITIES_PATH} \
         {ZONE_MART_PATH}
