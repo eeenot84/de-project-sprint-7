@@ -35,22 +35,15 @@ class ZoneMartBuilder:
         logger.info(f"Загружено {events_df.count()} событий")
         return events_df
     
-    def load_cities(self, cities_path: str):
-        """
-        Загрузка данных о городах.
-        
-        Args:
-            cities_path: путь к данным городов в HDFS
-            
-        Returns:
-            DataFrame с городами
-        """
-        logger.info(f"Загрузка городов из {cities_path}")
+    def load_cities(self, cities_path):
         cities_df = self.spark.read.csv(
             cities_path,
             header=True,
+            sep=";",
             inferSchema=True
         )
+        cities_df = cities_df.withColumn("lat", F.regexp_replace(F.col("lat"), ",", ".").cast("double"))
+        cities_df = cities_df.withColumn("lng", F.regexp_replace(F.col("lng"), ",", ".").cast("double"))
         logger.info(f"Загружено {cities_df.count()} городов")
         return cities_df
     
