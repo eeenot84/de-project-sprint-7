@@ -17,7 +17,7 @@ default_args = {
 }
 
 EVENTS_PATH = "/user/master/data/geo/events"
-CITIES_PATH = "/user/master/data/geo/cities"
+CITIES_PATH = "/user/eeenot007/data/geo/cities/geo.csv"
 USER_MART_PATH = "/user/master/data/geo/user_mart"
 ZONE_MART_PATH = "/user/master/data/geo/zone_mart"
 FRIENDS_RECOMMENDATION_MART_PATH = "/user/master/data/geo/friends_recommendation_mart"
