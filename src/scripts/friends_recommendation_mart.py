@@ -27,7 +27,14 @@ class FriendsRecommendationMartBuilder:
         return events_df
     
     def load_cities(self, cities_path):
-        cities_df = self.spark.read.csv(cities_path, header=True, inferSchema=True)
+        cities_df = self.spark.read.csv(
+            cities_path,
+            header=True,
+            sep=";",
+            inferSchema=True
+        )
+        cities_df = cities_df.withColumn("lat", F.regexp_replace(F.col("lat"), ",", ".").cast("double"))
+        cities_df = cities_df.withColumn("lng", F.regexp_replace(F.col("lng"), ",", ".").cast("double"))
         logger.info(f"Загружено {cities_df.count()} городов")
         return cities_df
     
