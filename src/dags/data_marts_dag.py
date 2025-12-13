@@ -33,6 +33,7 @@ daily_dag = DAG(
     catchup=False,
     tags=['data-marts', 'geo-analytics', 'daily'],
 )
+
 build_user_mart = BashOperator(
     task_id='build_user_mart',
     bash_command=f"""
@@ -82,6 +83,7 @@ weekly_dag = DAG(
     catchup=False,
     tags=['data-marts', 'geo-analytics', 'weekly'],
 )
+
 build_zone_mart = BashOperator(
     task_id='build_zone_mart',
     bash_command=f"""
@@ -100,4 +102,3 @@ build_zone_mart = BashOperator(
     """,
     dag=weekly_dag,
 )
-
