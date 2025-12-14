@@ -1,29 +1,37 @@
-import pyspark.sql.functions as F  # type: ignore
-from pyspark.sql.window import Window  # type: ignore
-from spark_app import SparkApp
+"""
+Скрипт для создания витрины данных в разрезе пользователей.
+"""
+
+import logging
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+import sys
+import os
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-class UserGeoStats(SparkApp):
+class UserMartBuilder:
+    
     EARTH_RADIUS_KM = 6371.0
-
-    def __init__(self):
-        super().__init__(
-            "UserGeoStats",
-            "UserGeoStats"
-        )
+    
+    def __init__(self, spark):
+        self.spark = spark
+    
+    def load_events(self, events_path):
+        events_df = self.spark.read.parquet(events_path)
+        logger.info(f"Загружено {events_df.count()} событий")
+        return events_df
     
     def load_cities(self, cities_path):
-        cities_df = self.spark.read.csv(
-            cities_path,
-            header=True,
-            sep=";",
-            inferSchema=True
-        )
-        cities_df = cities_df.withColumn("lat", F.regexp_replace(F.col("lat"), ",", ".").cast("double"))
-        cities_df = cities_df.withColumn("lng", F.regexp_replace(F.col("lng"), ",", ".").cast("double"))
+        cities_df = self.spark.read.csv(cities_path, header=True, inferSchema=True)
+        logger.info(f"Загружено {cities_df.count()} городов")
         return cities_df
     
     def calculate_distance(self, lat1, lon1, lat2, lon2):
+        # Формула гаверсинуса для вычисления расстояния на сфере
         lat1_rad = F.radians(lat1)
         lat2_rad = F.radians(lat2)
         delta_lat = F.radians(lat2 - lat1)
@@ -165,26 +173,43 @@ class UserGeoStats(SparkApp):
         # Объединяем все события
         all_events_enriched = events_with_city.union(events_without_coords_with_city)
         
+        logger.info(f"Обогащено {all_events_enriched.count()} событий")
         return all_events_enriched
     
-    def calculate_act_city(self, events_enriched_df):
-        act_city_df = events_enriched_df.filter(
+    def calculate_act_city_and_local_time(self, events_enriched_df):
+        # Используем оконную функцию для получения последнего сообщения без джойна
+        window_spec = Window.partitionBy("user_id").orderBy(F.desc("message_ts"))
+        last_events = events_enriched_df.filter(
             F.col("event_type") == "message"
-        ).groupBy("user_id").agg(
-            F.max("message_ts").alias("last_message_ts")
-        ).join(
-            events_enriched_df,
-            on=[
-                F.col("user_id") == F.col("user_id"),
-                F.col("last_message_ts") == F.col("message_ts")
-            ],
-            how="left"
+        ).withColumn(
+            "row_num",
+            F.row_number().over(window_spec)
+        ).filter(
+            F.col("row_num") == 1
         ).select(
             F.col("user_id"),
-            F.col("city").alias("act_city")
-        ).dropDuplicates(["user_id"])
+            F.col("city").alias("act_city"),
+            F.col("message_ts"),
+            F.col("timezone")
+        )
         
-        return act_city_df
+        # Вычисляем локальное время
+        act_city_and_time_df = last_events.withColumn(
+            "time_utc",
+            F.from_unixtime(F.col("message_ts"))
+        ).withColumn(
+            "local_time",
+            F.from_utc_timestamp(
+                F.col("time_utc"),
+                F.coalesce(F.col("timezone"), F.lit("UTC"))
+            )
+        ).select(
+            "user_id",
+            "act_city",
+            "local_time"
+        )
+        
+        return act_city_and_time_df
     
     def calculate_home_city(self, events_enriched_df):
         # Находим город, где пользователь был дольше 27 дней подряд
@@ -252,7 +277,21 @@ class UserGeoStats(SparkApp):
             "message_ts"
         ).orderBy("user_id", "message_ts")
         
-        travel_info = user_cities_ordered.groupBy("user_id").agg(
+        # Используем оконную функцию для получения предыдущего города
+        window_spec = Window.partitionBy("user_id").orderBy("message_ts")
+        user_cities_with_prev = user_cities_ordered.withColumn(
+            "prev_city",
+            F.lag("city").over(window_spec)
+        )
+        
+        # Фильтруем только те строки, где город отличается от предыдущего
+        # (или это первая строка для пользователя, где prev_city is null)
+        travel_cities = user_cities_with_prev.filter(
+            (F.col("city") != F.col("prev_city")) | F.col("prev_city").isNull()
+        )
+        
+        # Группируем и собираем города в список
+        travel_info = travel_cities.groupBy("user_id").agg(
             F.collect_list("city").alias("travel_array")
         ).withColumn(
             "travel_count",
@@ -265,74 +304,54 @@ class UserGeoStats(SparkApp):
         
         return travel_info
     
-    def calculate_local_time(self, events_enriched_df):
-        last_events = events_enriched_df.groupBy("user_id").agg(
-            F.max("message_ts").alias("last_message_ts")
-        ).join(
-            events_enriched_df,
-            on=[
-                F.col("user_id") == F.col("user_id"),
-                F.col("last_message_ts") == F.col("message_ts")
-            ],
-            how="left"
-        ).select(
-            F.col("user_id"),
-            F.col("message_ts"),
-            F.col("timezone")
-        ).dropDuplicates(["user_id"])
-        
-        local_time_df = last_events.withColumn(
-            "time_utc",
-            F.from_unixtime(F.col("message_ts"))
-        ).withColumn(
-            "local_time",
-            F.from_utc_timestamp(
-                F.col("time_utc"),
-                F.coalesce(F.col("timezone"), F.lit("UTC"))
-            )
-        ).withColumn(
-            "date",
-            F.to_date(F.col("time_utc"))
-        ).select(
-            "user_id",
-            "local_time",
-            "date"
-        )
-        
-        return local_time_df
     
-    def run(self, args):
-        date = args[0]
-        events_path = args[1]
-        cities_path = args[2]
-        user_mart_path = args[3]
-
-        events_df = self.spark.read.parquet(events_path)
+    def build_mart(self, events_path, cities_path, output_path):
+        events_df = self.load_events(events_path)
         cities_df = self.load_cities(cities_path)
-
+        
         events_enriched_df = self.enrich_events_with_cities(events_df, cities_df)
-
-        act_city_df = self.calculate_act_city(events_enriched_df)
+        
+        act_city_and_time_df = self.calculate_act_city_and_local_time(events_enriched_df)
         home_city_df = self.calculate_home_city(events_enriched_df)
         travel_info_df = self.calculate_travel_info(events_enriched_df)
-        local_time_df = self.calculate_local_time(events_enriched_df)
-
-        result = act_city_df \
-            .join(home_city_df, on='user_id', how='outer') \
-            .join(travel_info_df, on='user_id', how='outer') \
-            .join(local_time_df, on='user_id', how='outer') \
-            .select(
-                'user_id',
-                'act_city',
-                'home_city',
-                'travel_count',
-                'travel_array',
-                'local_time',
-                'date'
-            )
-
-        result.write.mode("overwrite").partitionBy("date").parquet(f'{user_mart_path}/dt={date}')
+        
+        user_mart = act_city_and_time_df.join(
+            home_city_df,
+            on="user_id",
+            how="outer"
+        ).join(
+            travel_info_df,
+            on="user_id",
+            how="outer"
+        )
+        
+        user_mart.write.mode("overwrite").parquet(output_path)
+        return user_mart
 
 
-if __name__ == '__main__':
-    UserGeoStats().main()
+def main():
+    events_path = os.getenv("EVENTS_PATH", "/user/master/data/geo/events")
+    cities_path = os.getenv("CITIES_PATH", "/user/master/data/geo/cities")
+    output_path = os.getenv("OUTPUT_PATH", "/user/master/data/geo/user_mart")
+    
+    if len(sys.argv) > 1:
+        events_path = sys.argv[1]
+    if len(sys.argv) > 2:
+        cities_path = sys.argv[2]
+    if len(sys.argv) > 3:
+        output_path = sys.argv[3]
+    
+    spark = SparkSession.builder.appName("UserMartBuilder").getOrCreate()
+    
+    try:
+        builder = UserMartBuilder(spark)
+        builder.build_mart(events_path, cities_path, output_path)
+    except Exception as e:
+        logger.error(f"Ошибка: {str(e)}", exc_info=True)
+        raise
+    finally:
+        spark.stop()
+
+
+if __name__ == "__main__":
+    main()
